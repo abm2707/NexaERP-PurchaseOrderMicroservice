@@ -20,6 +20,8 @@ public class PurchaseOrder {
     private LocalDate poDate;
     private String status;
 
+    private PurchaseOrderStatus statusEnum;
+
     @OneToMany(mappedBy = "purchaseOrder", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference
     private List<PurchaseOrderLineItem> lineItems = new ArrayList<>();

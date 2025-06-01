@@ -5,10 +5,15 @@ import com.example.purchaseOrder.purchaseOrder.DTOs.PurchaseOrderDTO;
 import com.example.purchaseOrder.purchaseOrder.DTOs.PurchaseOrderLineItemDTO;
 import com.example.purchaseOrder.purchaseOrder.Entity.PurchaseOrder;
 import com.example.purchaseOrder.purchaseOrder.Entity.PurchaseOrderLineItem;
+import com.example.purchaseOrder.purchaseOrder.Entity.PurchaseOrderStatus;
 import com.example.purchaseOrder.purchaseOrder.Repository.PurchaseOrderRepository;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.rest.webmvc.ResourceNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
+import java.lang.module.ResolutionException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -43,7 +48,6 @@ public class PurchaseOrderService {
     }
 
     public PurchaseOrder save(PurchaseOrder entity) {
-        // 1. Copy and clear the existing collection (don't replace the reference!)
         List<PurchaseOrderLineItem> items = new ArrayList<>(entity.getLineItems());
         entity.getLineItems().clear(); // This is safe!
 
@@ -62,7 +66,6 @@ public class PurchaseOrderService {
         // 4. Save again to persist line items
         return purchaseOrderRepository.save(savedParent);
     }
-
 
 
     public Optional<PurchaseOrder> findById(Long id) {
@@ -93,4 +96,86 @@ public class PurchaseOrderService {
         }
         return dto;
     }
+
+    @Transactional
+    public PurchaseOrderDTO updatePurchaseOrderStatus(Long id, PurchaseOrderStatus newStatus) {
+        // Find the purchase order by ID or throw exception
+        PurchaseOrder po = purchaseOrderRepository.findById(id)
+                .orElseThrow(() -> new ResolutionException("PurchaseOrder not found with id: " + id));
+
+        // Validate status transition logic
+        if (!isValidStatusTransition(PurchaseOrderStatus.valueOf(po.getStatus()), newStatus)) {
+            throw new IllegalStateException(
+                    String.format("Cannot transition from %s to %s", po.getStatus(), newStatus)
+            );
+        }
+
+        // Update status
+        po.setStatus(String.valueOf(newStatus));
+
+        // Save and return
+        PurchaseOrder updatedPO = purchaseOrderRepository.save(po);
+        return mapToDTO(updatedPO);
+    }
+
+    // Helper method: Validate status transition
+    private boolean isValidStatusTransition(PurchaseOrderStatus current, PurchaseOrderStatus newStatus) {
+        // Example: Only allow DRAFT -> APPROVED, APPROVED -> SHIPPED, SHIPPED -> RECEIVED
+        if (current == PurchaseOrderStatus.DRAFT && newStatus == PurchaseOrderStatus.APPROVED) {
+            return true;
+        }
+        if (current == PurchaseOrderStatus.APPROVED && newStatus == PurchaseOrderStatus.SHIPPED) {
+            return true;
+        }
+        if (current == PurchaseOrderStatus.SHIPPED && newStatus == PurchaseOrderStatus.RECEIVED) {
+            return true;
+        }
+        // Add more transitions as needed
+        return false;
+    }
+
+    @Transactional
+    public void deletePurchaseOrder(Long id) {
+        PurchaseOrder po = purchaseOrderRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("PurchaseOrder not found with id: " + id));
+
+        // Example business rule: Only DRAFT orders can be deleted
+        if (!po.getStatus().equalsIgnoreCase("DRAFT")) {
+            throw new IllegalStateException("Only DRAFT purchase orders can be deleted");
+        }
+
+        purchaseOrderRepository.delete(po);
+    }
+
+    public Page<PurchaseOrderDTO> getAllPurchaseOrders(Pageable pageable, PurchaseOrderStatus status) {
+        if (status != null) {
+            return purchaseOrderRepository.findByStatus(status, pageable)
+                    .map(this::mapToDTO);
+        } else {
+            return purchaseOrderRepository.findAll(pageable)
+                    .map(this::mapToDTO);
+        }
+    }
+
+    @Transactional
+    public PurchaseOrderDTO createPurchaseOrder(PurchaseOrderDTO poDTO) {
+        // Map DTO to Entity
+        PurchaseOrder po = mapToEntity(poDTO);
+        // Set initial status (e.g., DRAFT)
+        po.setStatus(String.valueOf(PurchaseOrderStatus.DRAFT));
+        // Optionally: Validate vendor and products here (if not done in DTO/entity)
+        // Save to database
+        PurchaseOrder savedPO = purchaseOrderRepository.save(po);
+        // Map Entity back to DTO
+        return mapToDTO(savedPO);
+    }
+
+    @Transactional(readOnly = true)
+    public PurchaseOrderDTO getPurchaseOrderById(Long id) {
+        return purchaseOrderRepository.findById(id)
+                .map(this::mapToDTO)
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase order not found with id: " + id));
+    }
+
+
 }
